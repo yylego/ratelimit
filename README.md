@@ -21,10 +21,12 @@ In-process rate limiter with per-key independent throttling.
 
 ## Features
 
-- **Sliding Window**: Counts requests in the past 1 second, precise QPS enforcement
+- **Sliding Window**: Counts requests within a configurable window, precise QPS enforcement
 - **Per-Key Isolation**: Each key gets its own independent limiter, no cross-contamination
-- **Auto Expiration**: Idle keys are cleaned up to prevent unbounded RAM usage
-- **Concurrence Safe**: Read-write lock on key map, mutex on each limiter instance
+- **Auto Eviction**: Idle keys are cleaned up to prevent unbounded RAM usage
+- **Batch Sweep**: Configurable max evictions per sweep via `SetSweepBatch`
+- **Background Sweep**: Goroutine-based sweep via `StartSweepGoroutine` / `CloseSweepGoroutine`
+- **Concurrence Safe**: Mutex on key map + heap, independent mutex on each limiter instance
 
 ## Installation
 
@@ -71,22 +73,30 @@ Each `Limiter` maintains a sorted slice of request timestamps (nanoseconds). On 
 
 ### Auto Eviction
 
-Idle keys are evicted lazily via min-heap — no background goroutine needed. On each `Allow()` call, the heap top is checked and expired keys are removed. Map and heap are 1:1, no duplicate nodes.
+Idle keys are evicted via min-heap. Two modes:
+
+- **Inline mode** (default): On each `Allow()` call, the heap top is checked and expired keys are removed, up to `sweepBatch` at a time
+- **Background mode**: Call `StartSweepGoroutine(tick)` to launch a dedicated goroutine that sweeps on a fixed tick. `Allow()` skips inline sweep in this mode. Call `CloseSweepGoroutine()` to close and switch back
+
+Map and heap are 1:1, no duplicate nodes.
 
 ### Concurrence
 
-- `Group` lock is held to access the key map and heap, then released before calling `Limiter.Allow()`
+- `Group` mutex is held to access the key map and heap, then released before `Limiter.Allow()`
 - Each `Limiter` uses its own `sync.Mutex` — different keys are rate-checked in true concurrence
 
 ## API
 
-| Type | Method | Description |
-|------|--------|-------------|
-| `Group` | `NewGroup(threshold, window)` | Create per-key limiter group |
-| `Group` | `Allow(key) bool` | Check if request is within limit |
-| `Limiter` | `NewLimiter(threshold)` | Create single-key limiter (1s window) |
-| `Limiter` | `NewLimiterWithWindow(threshold, window)` | Create single-key limiter (custom window) |
-| `Limiter` | `Allow() bool` | Check if request is within limit |
+| Type      | Method                                    | Description                                   |
+| --------- | ----------------------------------------- | --------------------------------------------- |
+| `Group`   | `NewGroup(threshold, window)`             | Create per-key limiter group                  |
+| `Group`   | `Allow(key) bool`                         | Check if request is within limit              |
+| `Group`   | `SetSweepBatch(n)`                        | Set max evictions per sweep                   |
+| `Group`   | `StartSweepGoroutine(tick)`               | Start background sweep goroutine              |
+| `Group`   | `CloseSweepGoroutine()`                   | Close background sweep, switch back to inline |
+| `Limiter` | `NewLimiter(threshold)`                   | Create single-key limiter (1s window)         |
+| `Limiter` | `NewLimiterWithWindow(threshold, window)` | Create single-key limiter (custom window)     |
+| `Limiter` | `Allow() bool`                            | Check if request is within limit              |
 
 ---
 

@@ -12,8 +12,8 @@ github.com/rogpeppe/go-internal v1.13.1 h1:KvO1DLK/DRN07sQ1LQKScxyZJuNnedQ5/wKSR
 github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWNMNyH2VO9fmH0o=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/yylego/heapx v0.0.0 h1:XZg108pvp/ZhcPaIxd5v9StI7XtDugN0uYrtpIAgFgc=
-github.com/yylego/heapx v0.0.0/go.mod h1:TEoX7UG2CiLe5zOSQx8KjHStxHsiGGFQOtkh6VtHuwo=
+github.com/yylego/heapx v0.0.1 h1:EWM/RBWGtAMqq4ASNF4bKQrwia59UVKYfZuvvIAZsQg=
+github.com/yylego/heapx v0.0.1/go.mod h1:TEoX7UG2CiLe5zOSQx8KjHStxHsiGGFQOtkh6VtHuwo=
 github.com/yylego/must v0.0.0 h1:x2KPl61oxeLslgK3AH3nBQiGYic/MIb8mj6TOnVsalE=
 github.com/yylego/must v0.0.0/go.mod h1:9tdcRG+PZ9ah8bMSjxu+/4OEWtGdINeKdmik1WNhsYw=
 github.com/yylego/mutexmap v0.0.0 h1:gnJEBJoYP/3XyXfespDimm2I8UUv+UovbCZ0GYZnYkc=

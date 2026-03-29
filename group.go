@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"math"
 	"sync"
 	"time"
 
@@ -17,11 +18,14 @@ type expireItem struct {
 // Group is a concurrent-safe per-key rate limiter with heap-based auto-eviction
 // Map and heap are 1:1 — each key has exactly one heap node, no duplicates
 type Group struct {
-	dataItems  map[string]*heapx.Node[expireItem]
-	threshold  int
-	windowNano int64
-	mu         *sync.Mutex
-	expireHeap *heapx.Heap[expireItem]
+	dataItems         map[string]*heapx.Node[expireItem]
+	threshold         int
+	windowNano        int64
+	mu                *sync.Mutex
+	expireHeap        *heapx.Heap[expireItem]
+	sweepBatch        int           // max evictions per sweep
+	sweepInBackground bool          // when true, Allow() skips sweep
+	sweepDone         chan struct{} // close to stop background goroutine
 }
 
 // NewGroup creates a per-key rate limiter group with the given threshold and window
@@ -35,7 +39,15 @@ func NewGroup(threshold int, window time.Duration) *Group {
 		expireHeap: heapx.New[expireItem](func(a, b expireItem) bool {
 			return a.accessNano < b.accessNano
 		}),
+		sweepBatch: math.MaxInt, // default: no cap, clean all expired
 	}
+}
+
+// SetSweepBatch sets the maximum evictions per sweep call
+func (G *Group) SetSweepBatch(n int) {
+	G.mu.Lock()
+	G.sweepBatch = n
+	G.mu.Unlock()
 }
 
 // Allow checks if the request to the given key is allowed
@@ -43,7 +55,9 @@ func (G *Group) Allow(key string) bool {
 	G.mu.Lock()
 	now := time.Now().UnixNano()
 
-	G.sweep(now)
+	if !G.sweepInBackground {
+		G.sweep(now)
+	}
 
 	node, ok := G.dataItems[key]
 	if !ok {
@@ -64,15 +78,67 @@ func (G *Group) Allow(key string) bool {
 	return lm.Allow()
 }
 
-// sweep removes idle keys from the heap top
+// StartSweepGoroutine starts a background goroutine that sweeps expired keys on a fixed tick
+// Once started, Allow() stops inline sweep — the background goroutine handles it
+// Call CloseSweepGoroutine() to close and switch back to inline sweep
+func (G *Group) StartSweepGoroutine(tick time.Duration) {
+	G.mu.Lock()
+	if G.sweepInBackground {
+		G.mu.Unlock()
+		return
+	}
+	G.sweepInBackground = true
+	G.sweepDone = make(chan struct{})
+	G.mu.Unlock()
+
+	go func() {
+		t := time.NewTicker(tick)
+		defer t.Stop()
+		for {
+			select {
+			case <-G.sweepDone:
+				return
+			case <-t.C:
+				G.mu.Lock()
+				G.sweep(time.Now().UnixNano())
+				G.mu.Unlock()
+			}
+		}
+	}()
+}
+
+// CloseSweepGoroutine closes the background sweep goroutine and switches back to inline sweep
+func (G *Group) CloseSweepGoroutine() {
+	G.mu.Lock()
+	if G.sweepInBackground {
+		close(G.sweepDone)
+		G.sweepInBackground = false
+	}
+	G.mu.Unlock()
+}
+
+// KeysCount returns the count of active keys in the group
+func (G *Group) KeysCount() int {
+	G.mu.Lock()
+	n := len(G.dataItems)
+	G.mu.Unlock()
+	return n
+}
+
+// sweep removes idle keys from the heap top, up to sweepBatch
 func (G *Group) sweep(now int64) {
 	cutoff := now - G.windowNano
+	count := 0
 	for G.expireHeap.Len() > 0 {
+		if count >= G.sweepBatch {
+			break
+		}
 		top := G.expireHeap.Peek()
 		if top == nil || top.Value.accessNano > cutoff {
 			break
 		}
 		G.expireHeap.Pop()
 		delete(G.dataItems, top.Value.key)
+		count++
 	}
 }

@@ -21,10 +21,12 @@
 
 ## 功能特性
 
-- **滑动窗口**：统计过去 1 秒内的请求数，精确 QPS 控制
+- **滑动窗口**：在可配置的时间窗口内统计请求数，精确 QPS 控制
 - **按 Key 隔离**：每个 Key 独立限流，互不干扰
-- **自动过期**：长时间无请求的 Key 自动清理，防止内存无限增长
-- **并发安全**：Key 映射表使用读写锁，每个限流器独立互斥锁
+- **自动淘汰**：空闲 Key 自动清理，防止内存无限增长
+- **批量清扫**：通过 `SetSweepBatch` 配置每次清扫的最大淘汰数
+- **后台清扫**：通过 `StartSweepGoroutine` / `CloseSweepGoroutine` 启用协程清扫
+- **并发安全**：Key 映射表和堆使用互斥锁，每个限流器独立互斥锁
 
 ## 安装
 
@@ -71,22 +73,30 @@ func main() {
 
 ### 自动淘汰
 
-空闲 Key 通过最小堆懒淘汰 — 无需后台协程。每次 `Allow()` 调用时检查堆顶，移除过期 Key。Map 和堆 1:1 对应，无重复节点。
+空闲 Key 通过最小堆淘汰，支持两种模式：
+
+- **内联模式**（默认）：每次 `Allow()` 调用时检查堆顶，移除过期 Key，每次最多淘汰 `sweepBatch` 个
+- **后台模式**：调用 `StartSweepGoroutine(tick)` 启动专用协程定时清扫。此模式下 `Allow()` 跳过内联清扫。调用 `CloseSweepGoroutine()` 关闭并切回内联模式
+
+Map 和堆 1:1 对应，无重复节点。
 
 ### 并发设计
 
-- `Group` 锁只保护 Key 映射表和堆操作，释放后再调 `Limiter.Allow()`
+- `Group` 互斥锁保护 Key 映射表和堆操作，释放后再调 `Limiter.Allow()`
 - 每个 `Limiter` 使用独立的 `sync.Mutex` — 不同 Key 的限流判断真正并行
 
 ## 接口
 
-| 类型 | 方法 | 说明 |
-|------|------|------|
-| `Group` | `NewGroup(threshold, window)` | 创建按 Key 限流组 |
-| `Group` | `Allow(key) bool` | 检查请求是否在限额内 |
-| `Limiter` | `NewLimiter(threshold)` | 创建单 Key 限流器（1 秒窗口） |
+| 类型      | 方法                                      | 说明                            |
+| --------- | ----------------------------------------- | ------------------------------- |
+| `Group`   | `NewGroup(threshold, window)`             | 创建按 Key 限流组               |
+| `Group`   | `Allow(key) bool`                         | 检查请求是否在限额内            |
+| `Group`   | `SetSweepBatch(n)`                        | 设置每次清扫的最大淘汰数        |
+| `Group`   | `StartSweepGoroutine(tick)`               | 启动后台清扫协程                |
+| `Group`   | `CloseSweepGoroutine()`                   | 关闭后台清扫，切回内联模式      |
+| `Limiter` | `NewLimiter(threshold)`                   | 创建单 Key 限流器（1 秒窗口）   |
 | `Limiter` | `NewLimiterWithWindow(threshold, window)` | 创建单 Key 限流器（自定义窗口） |
-| `Limiter` | `Allow() bool` | 检查请求是否在限额内 |
+| `Limiter` | `Allow() bool`                            | 检查请求是否在限额内            |
 
 ---
 
